@@ -60,10 +60,6 @@ public class ProducerConfig extends AbstractConfig {
 
     /** <code>client.dns.lookup</code> */
     public static final String CLIENT_DNS_LOOKUP_CONFIG = CommonClientConfigs.CLIENT_DNS_LOOKUP_CONFIG;
-
-    public static final String METADATA_TOPIC_EXPIRY_MS_CONFIG = CommonClientConfigs.METADATA_TOPIC_EXPIRY_MS_CONFIG;
-    private static final String METADATA_TOPIC_EXPIRY_MS_DOC = CommonClientConfigs.METADATA_TOPIC_EXPIRY_MS_DOC;
-
     /** <code>metadata.max.age.ms</code> */
     public static final String METADATA_MAX_AGE_CONFIG = CommonClientConfigs.METADATA_MAX_AGE_CONFIG;
     private static final String METADATA_MAX_AGE_DOC = CommonClientConfigs.METADATA_MAX_AGE_DOC;
@@ -459,11 +455,6 @@ public class ProducerConfig extends AbstractConfig {
                                         60000,
                                         Importance.LOW,
                                         TRANSACTION_TIMEOUT_DOC)
-                                .define(METADATA_TOPIC_EXPIRY_MS_CONFIG,
-                                    Type.LONG,
-                                    ProducerMetadata.TOPIC_EXPIRY_MS,
-                                    Importance.LOW,
-                                    METADATA_TOPIC_EXPIRY_MS_DOC)
                                 .define(TRANSACTIONAL_ID_CONFIG,
                                         Type.STRING,
                                         null,
