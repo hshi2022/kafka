@@ -143,7 +143,7 @@ public class Metadata implements Closeable {
      */
     public synchronized boolean shouldUpdateClusterMetadataFromBootstrap(long nowMs) {
         return (this.nodesTriedSinceLastSuccessfulRefresh >= 1 &&
-            this.lastSuccessfulRefreshMs + this.maxClusterMetadataExpireTimeMs <= nowMs) ||
+            (this.lastRefreshMs != 0 && this.lastSuccessfulRefreshMs + this.maxClusterMetadataExpireTimeMs <= nowMs)) ||
             this.forceClusterMetadataUpdateFromBootstrap;
     }
 
