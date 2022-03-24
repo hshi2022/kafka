@@ -115,8 +115,6 @@ public class MetadataTest {
         //bootstrap the metadata cache with some valid nodes
         clusterMetadata.bootstrap(addresses);
 
-        clusterMetadata.requestClusterMetadataUpdateFromBootstrap();
-
         //first time call leastLoadedNode on the created NetworkClient should pass since nodesTriedSinceLastSuccessfulRefresh is 0
         clusterClient.leastLoadedNode(time.milliseconds());
 
@@ -125,6 +123,7 @@ public class MetadataTest {
 
         //now second call to leastLoadedNode on the NetworkClient should fail since we passed an invalid bootstrap server to it
         //it should throw a ConfigException of no resolvable bootstrap server in provided urls
+        clusterMetadata.requestClusterMetadataUpdateFromBootstrap();
         assertThrows(ConfigException.class, () -> clusterClient.leastLoadedNode(time.milliseconds()));
     }
 
