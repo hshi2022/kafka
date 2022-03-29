@@ -34,7 +34,7 @@ import org.apache.kafka.common.utils.Utils
 // This should be named EmbeddedZooKeeper for consistency with other classes, but since this is widely used by other
 // projects (even though it's internal), we keep the name as it is until we have a publicly supported test library for
 // others to use.
-class EmbeddedZookeeper() extends Logging {
+class EmbeddedZookeeper(requestedPort: Int = TestUtils.RandomPort) extends Logging {
 
   val snapshotDir = TestUtils.tempDir()
   val logDir = TestUtils.tempDir()
@@ -43,7 +43,7 @@ class EmbeddedZookeeper() extends Logging {
   System.setProperty("zookeeper.forceSync", "no")  //disable fsync to ZK txn log in tests to avoid timeout
   val zookeeper = new ZooKeeperServer(snapshotDir, logDir, tickTime)
   val factory = new NIOServerCnxnFactory()
-  private val addr = new InetSocketAddress("127.0.0.1", TestUtils.RandomPort)
+  private val addr = new InetSocketAddress("127.0.0.1", requestedPort)
   factory.configure(addr, 0)
   factory.startup(zookeeper)
   val port = zookeeper.getClientPort

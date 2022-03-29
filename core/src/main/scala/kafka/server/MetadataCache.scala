@@ -330,6 +330,9 @@ class MetadataCache(brokerId: Int) extends Logging {
         val tp = new TopicPartition(info.topicName, info.partitionIndex)
         if (info.leader == LeaderAndIsr.LeaderDuringDelete) {
           removePartitionInfo(partitionStates, tp.topic, tp.partition)
+          // TODO:  for federation case, enhance both this log and its sibling below with "cluster ${clusterId} "
+          //   (or with "color" if have such a human-readable alternative), but currently we don't have access to
+          //   the local clusterId in here
           stateChangeLogger.trace(s"Deleted partition $tp from metadata cache in response to UpdateMetadata " +
             s"request sent by controller $controllerId epoch $controllerEpoch of origin cluster $originClusterId " +
             s"with correlation id $correlationId")

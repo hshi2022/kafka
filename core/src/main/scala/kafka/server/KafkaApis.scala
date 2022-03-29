@@ -332,6 +332,12 @@ class KafkaApis(val requestChannel: RequestChannel,
       }
     }
     quotas.clientQuotaCallback.foreach { callback =>
+      // It's unclear what the clusterId arg in here is intended for; getClusterMetadata() simply stuffs it into
+      // the returned Cluster object, and neither the Apache Kafka repo nor LinkedIn have any real implementations
+      // of updateClusterMetadata() outside of a single test case (CustomQuotaCallbackTest), which doesn't use
+      // clusterId.  Best guess is that some external users might use it for logging, in which case the best
+      // approach would probably be to replace it with the value of li.federation.id if federation is enabled.
+      // TODO for pushing federation upstream, if/when that happens.  (See also LIKAFKA-42885.)
       if (callback.updateClusterMetadata(metadataCache.getClusterMetadata(clusterId, request.context.listenerName))) {
         quotas.fetch.updateQuotaMetricConfigs()
         quotas.produce.updateQuotaMetricConfigs()

@@ -69,7 +69,7 @@ abstract class MultiClusterZooKeeperTestHarness extends Logging {
   def setUp(): Unit = {
     (0 until numClusters).map { i =>
       debug(s"creating zookeeper/zkClient/adminZkClient " + (i+1) + " of " + numClusters)
-      zookeepers += new EmbeddedZookeeper()
+      zookeepers += new EmbeddedZookeeper(10000 + 100*(i + 1))  // 10100, 10200, ...
       zkClients += KafkaZkClient(zkConnect(i), zkAclsEnabled.getOrElse(JaasUtils.isZkSaslEnabled), zkSessionTimeout,
         zkConnectionTimeout, zkMaxInFlightRequests, Time.SYSTEM)
       adminZkClients += new AdminZkClient(zkClients(i))
