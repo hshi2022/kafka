@@ -1488,7 +1488,7 @@ public class NetworkClient implements KafkaClient {
 
         @Override
         public void handleFailedRequest(long now, Optional<KafkaException> maybeFatalException) {
-            handleFailedRequest(now, maybeFatalException, updateMetadataLastRefreshTimeOnDisconnection);
+            handleFailedRequest(now, maybeFatalException, true);
         }
 
         private void handleFailedRequest(long now, Optional<KafkaException> maybeFatalException, boolean updateLastRefreshTime) {
