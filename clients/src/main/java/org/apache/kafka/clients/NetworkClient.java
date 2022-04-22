@@ -1488,7 +1488,13 @@ public class NetworkClient implements KafkaClient {
 
         @Override
         public void handleFailedRequest(long now, Optional<KafkaException> maybeFatalException) {
-            handleFailedRequest(now, maybeFatalException, true);
+            // this handleFailedRequest can be called in two scenarios:
+            // 1. cancelInFlightRequests due to node disconnected
+            // 2. doSend when api version mismatch.
+            // In case 1, the param maybeFatalException will be empty and in case 2, it will be an unsupportedVersionException,
+            // so we'll use the existence of exception to keep the other behavior unchanged, only do not set lastRefreshMd
+            // upon node disconnection.
+            handleFailedRequest(now, maybeFatalException, maybeFatalException.isPresent());
         }
 
         private void handleFailedRequest(long now, Optional<KafkaException> maybeFatalException, boolean updateLastRefreshTime) {
