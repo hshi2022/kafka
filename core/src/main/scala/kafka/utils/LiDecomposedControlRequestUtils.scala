@@ -20,12 +20,12 @@ package kafka.utils
 import java.util
 import kafka.api._
 import kafka.server.KafkaConfig
-import org.apache.kafka.common.{Node, TopicPartition}
+import org.apache.kafka.common.{Node, TopicPartition, Uuid}
 import org.apache.kafka.common.message.LeaderAndIsrRequestData.LeaderAndIsrPartitionState
 import org.apache.kafka.common.message.LiCombinedControlRequestData
 import org.apache.kafka.common.message.StopReplicaRequestData.{StopReplicaPartitionState, StopReplicaTopicState}
 import org.apache.kafka.common.message.UpdateMetadataRequestData.{UpdateMetadataBroker, UpdateMetadataPartitionState}
-import org.apache.kafka.common.requests.{LeaderAndIsrRequest, LeaderAndIsrRequestType, LiCombinedControlRequest, StopReplicaRequest, UpdateMetadataRequest}
+import org.apache.kafka.common.requests.{LeaderAndIsrRequest, LiCombinedControlRequest, StopReplicaRequest, UpdateMetadataRequest}
 import org.apache.kafka.common.utils.LiCombinedControlTransformer
 
 import scala.collection.JavaConverters._
@@ -69,12 +69,19 @@ object LiDecomposedControlRequestUtils {
       }
 
       val leaderAndIsrRequestVersion: Short =
-        if (config.interBrokerProtocolVersion >= KAFKA_2_4_IV1) 5
+        if (config.interBrokerProtocolVersion >= KAFKA_3_0_IV1) 6
+        else if (config.interBrokerProtocolVersion >= KAFKA_2_4_IV1) 5
         else throw new IllegalStateException("The inter.broker.protocol.version config should not be smaller than 2.4-IV1")
 
       // the LiCombinedControl request will only include incremental LeaderAndIsr requests
-      Some(new LeaderAndIsrRequest.Builder(leaderAndIsrRequestVersion, request.controllerId(), request.controllerEpoch(), request.brokerEpoch(),
-        request.maxBrokerEpoch(), effectivePartitionStates, util.Collections.emptyMap(), leaderNodes
+      val topicIds: util.Map[String, Uuid] = if (request.version() >= 1) {
+        request.leaderAndIsrTopicIds();
+      } else {
+        util.Collections.emptyMap();
+      }
+
+      Some(new LeaderAndIsrRequest.Builder(leaderAndIsrRequestVersion, request.controllerId(), request.controllerEpoch(),
+        request.brokerEpoch(), request.maxBrokerEpoch(), effectivePartitionStates, topicIds, leaderNodes
       ).build())
     }
   }
@@ -95,11 +102,18 @@ object LiDecomposedControlRequestUtils {
       None
     } else {
       val updateMetadataRequestVersion: Short =
-        if (config.interBrokerProtocolVersion >= KAFKA_2_4_IV1) 7
+        if (config.interBrokerProtocolVersion >= KAFKA_3_0_IV1) 8
+        else if (config.interBrokerProtocolVersion >= KAFKA_2_4_IV1) 7
         else throw new IllegalStateException("The inter.broker.protocol.version config should not be smaller than 2.4-IV1")
 
+      val topicIds: util.Map[String, Uuid] = if (request.version() >= 1) {
+        request.updateMetadataTopicIds();
+      } else {
+        util.Collections.emptyMap();
+      }
+
       Some(new UpdateMetadataRequest.Builder(updateMetadataRequestVersion, request.controllerId(), request.controllerEpoch(), request.brokerEpoch(),
-        request.maxBrokerEpoch(), effectivePartitionStates, liveBrokers, util.Collections.emptyMap()).build())
+        request.maxBrokerEpoch(), effectivePartitionStates, liveBrokers, topicIds).build())
     }
   }
 

@@ -18,14 +18,18 @@
 package org.apache.kafka.common.utils;
 
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.message.LeaderAndIsrRequestData;
 import org.apache.kafka.common.message.LeaderAndIsrResponseData;
 import org.apache.kafka.common.message.LiCombinedControlRequestData;
 import org.apache.kafka.common.message.LiCombinedControlResponseData;
+import org.apache.kafka.common.message.StopReplicaRequestData;
 import org.apache.kafka.common.message.StopReplicaResponseData;
 import org.apache.kafka.common.message.UpdateMetadataRequestData;
+
 
 
 public class LiCombinedControlTransformer {
@@ -155,12 +159,40 @@ public class LiCombinedControlTransformer {
                         .setErrorCode(error.errorCode())).collect(Collectors.toList());
     }
 
+    public static LeaderAndIsrResponseData.LeaderAndIsrTopicErrorCollection restoreLeaderAndIsrTopicErrors(
+            LiCombinedControlResponseData.LeaderAndIsrTopicErrorCollection errors) {
+        LeaderAndIsrResponseData.LeaderAndIsrTopicErrorCollection topicErrors = new LeaderAndIsrResponseData.LeaderAndIsrTopicErrorCollection();
+        for (LiCombinedControlResponseData.LeaderAndIsrTopicError error : errors) {
+            topicErrors.add(new LeaderAndIsrResponseData.LeaderAndIsrTopicError().setTopicId(error.topicId())
+                    .setPartitionErrors(restoreLeaderAndIsrPartitionErrors(error.partitionErrors())));
+        }
+        return topicErrors;
+    }
+
     public static List<LiCombinedControlResponseData.StopReplicaPartitionError> transformStopReplicaPartitionErrors(
-            List<StopReplicaResponseData.StopReplicaPartitionError> errors) {
-        return errors.stream().map(error ->
+        Map<TopicPartition, StopReplicaRequestData.StopReplicaPartitionState> partitionStates,
+        List<StopReplicaResponseData.StopReplicaPartitionError> errors, int liCombinedControlRequestVersion) {
+        return errors.stream().map(error -> {
+            LiCombinedControlResponseData.StopReplicaPartitionError stopReplicaPartitionError =
                 new LiCombinedControlResponseData.StopReplicaPartitionError().setTopicName(error.topicName())
-                        .setPartitionIndex(error.partitionIndex())
-                        .setErrorCode(error.errorCode())).collect(Collectors.toList());
+                    .setPartitionIndex(error.partitionIndex())
+                    .setErrorCode(error.errorCode());
+            if (liCombinedControlRequestVersion >= 1) {
+                StopReplicaRequestData.StopReplicaPartitionState partitionState =
+                    partitionStates.get(new TopicPartition(error.topicName(), error.partitionIndex()));
+                boolean deletePartition = false;
+                if (partitionState != null) {
+                    // Considering the partitions in the StopReplica response should always match that in
+                    // the StopReplica request, we expect the partition to be always present in the
+                    // partitionStates map and the partitionState variable to be always non-null.
+                    // The check against null is to guard against unexpected mis-behaviors.
+                    deletePartition = partitionState.deletePartition();
+                }
+
+                stopReplicaPartitionError.setDeletePartition(deletePartition);
+            }
+            return stopReplicaPartitionError;
+        }).collect(Collectors.toList());
     }
 
     public static List<StopReplicaResponseData.StopReplicaPartitionError> restoreStopReplicaPartitionErrors(
@@ -168,6 +200,7 @@ public class LiCombinedControlTransformer {
         return errors.stream().map(error ->
                 new StopReplicaResponseData.StopReplicaPartitionError().setTopicName(error.topicName())
                         .setPartitionIndex(error.partitionIndex())
+                        .setDeletePartition(error.deletePartition())
                         .setErrorCode(error.errorCode())).collect(Collectors.toList());
     }
 }

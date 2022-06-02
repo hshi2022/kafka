@@ -558,7 +558,7 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {
     val broker1 = servers.find(_.config.brokerId == 1).get
     broker1.shutdown()
 
-    var activeServers = servers.filter(s => s != broker1)
+    val activeServers = servers.filter(s => s != broker1)
     // wait for the update metadata request to trickle to the brokers
     TestUtils.waitUntilTrue(() =>
       activeServers.forall(_.dataPlaneRequestProcessor.metadataCache.getPartitionInfo(topic,partition).get.isr.size == 1),
@@ -1766,6 +1766,7 @@ class ControllerIntegrationTest extends ZooKeeperTestHarness {
       config.setProperty(KafkaConfig.AutoLeaderRebalanceEnableProp, autoLeaderRebalanceEnable.toString)
       config.setProperty(KafkaConfig.UncleanLeaderElectionEnableProp, uncleanLeaderElectionEnable.toString)
       config.setProperty(KafkaConfig.LeaderImbalanceCheckIntervalSecondsProp, "1")
+      config.setProperty(KafkaConfig.LiCombinedControlRequestEnableProp, "true")
       listeners.foreach(listener => config.setProperty(KafkaConfig.ListenersProp, listener))
       listenerSecurityProtocolMap.foreach(listenerMap => config.setProperty(KafkaConfig.ListenerSecurityProtocolMapProp, listenerMap))
       controlPlaneListenerName.foreach(controlPlaneListener => config.setProperty(KafkaConfig.ControlPlaneListenerNameProp, controlPlaneListener))

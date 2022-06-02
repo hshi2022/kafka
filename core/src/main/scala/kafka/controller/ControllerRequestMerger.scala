@@ -17,6 +17,9 @@
 
 package kafka.controller
 
+import com.google.common.collect.ImmutableMap
+import kafka.api.KAFKA_3_0_IV0
+import kafka.server.KafkaConfig
 import kafka.utils.{LiDecomposedControlResponse, LiDecomposedControlResponseUtils, Logging}
 import org.apache.kafka.common.message.LiCombinedControlRequestData
 import org.apache.kafka.common.message.LiCombinedControlRequestData._
@@ -31,7 +34,11 @@ import scala.collection.mutable
 
 case class RequestControllerState(controllerId: Int, controllerEpoch: Int)
 
-class ControllerRequestMerger extends Logging {
+class ControllerRequestMerger(config: KafkaConfig) extends Logging {
+  val liCombinedControlRequestVersion: Short =
+    if (config.interBrokerProtocolVersion >= KAFKA_3_0_IV0) 1
+    else 0
+
   val leaderAndIsrPartitionStates: mutable.Map[TopicIdPartition, util.LinkedList[LeaderAndIsrPartitionState]] = mutable.HashMap.empty
   var leaderAndIsrLiveLeaders: util.Collection[Node] = new util.ArrayList[Node]()
 
@@ -170,13 +177,15 @@ class ControllerRequestMerger extends Logging {
 
         val queuedStates = stopReplicaPartitionStates.getOrElseUpdate(partition,
           new util.LinkedList[StopReplicaPartitionState]())
-        val deletePartitions = request.deletePartitions()
         val transformedPartitionState = new StopReplicaPartitionState()
           .setTopicName(partition.topicPartition().topic())
           .setPartitionIndex(partition.topicPartition().partition())
-          .setDeletePartitions(deletePartitions)
+          .setDeletePartitions(partitionState.deletePartition())
           .setBrokerEpoch(request.brokerEpoch())
-          .setLeaderEpoch(partitionState.leaderEpoch())
+
+          if (liCombinedControlRequestVersion >= 1) {
+            transformedPartitionState.setLeaderEpoch(partitionState.leaderEpoch())
+          }
 
         mergeStopReplicaPartitionState(transformedPartitionState, queuedStates)
 
@@ -185,6 +194,9 @@ class ControllerRequestMerger extends Logging {
       }
     }}
 
+    // Here a later request's callback may be overwriting a previous request's callback.
+    // To preserve correctness, we require that the later callback and the earlier callback
+    // must have the same sideeffects when they are provided with the same StopReplica response.
     stopReplicaCallback = callback
   }
   private def clearStopReplicaPartitionState(topicIdPartition: TopicIdPartition): Unit = {
@@ -255,10 +267,11 @@ class ControllerRequestMerger extends Logging {
     } else {
       val (latestUpdateMetadataPartitions, liveBrokers) = pollLatestUpdateMetadataInfo()
 
-      val latestRequest = new LiCombinedControlRequest.Builder(0, controllerState.controllerId, controllerState.controllerEpoch,
+      val latestRequest = new LiCombinedControlRequest.Builder(
+        liCombinedControlRequestVersion, controllerState.controllerId, controllerState.controllerEpoch,
         pollLatestLeaderAndIsrPartitions(), leaderAndIsrLiveLeaders,
         latestUpdateMetadataPartitions, liveBrokers,
-        pollLatestStopReplicaPartitions(), aggregateTopicIds
+        pollLatestStopReplicaPartitions(), ImmutableMap.copyOf(aggregateTopicIds)
       )
       if (!hasPendingRequests()) {
         clearAggregateState()
@@ -277,7 +290,9 @@ class ControllerRequestMerger extends Logging {
       LiDecomposedControlResponseUtils.decomposeResponse(response.asInstanceOf[LiCombinedControlResponse])
     }
     if (leaderAndIsrCallback != null
-      && (!leaderAndIsrResponse.data.partitionErrors.isEmpty || leaderAndIsrResponse.error() != Errors.NONE)) {
+      && (!leaderAndIsrResponse.data.partitionErrors.isEmpty ||
+      !leaderAndIsrResponse.data().topics().isEmpty ||
+      leaderAndIsrResponse.error() != Errors.NONE)) {
       // fire callback only if leaderAndIsrResponse is non-empty or contains errors
       leaderAndIsrCallback(leaderAndIsrResponse)
     }
