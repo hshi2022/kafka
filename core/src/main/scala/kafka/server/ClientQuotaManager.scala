@@ -19,11 +19,10 @@ package kafka.server
 import java.{lang, util}
 import java.util.concurrent.{ConcurrentHashMap, DelayQueue, TimeUnit}
 import java.util.concurrent.locks.ReentrantReadWriteLock
-
 import kafka.network.RequestChannel
 import kafka.network.RequestChannel._
 import kafka.server.ClientQuotaManager._
-import kafka.utils.{KafkaScheduler, Logging, QuotaUtils, ShutdownableThread}
+import kafka.utils.{KafkaScheduler, Logging, QuotaUtils, RateLimitedLogging, ShutdownableThread}
 import org.apache.kafka.common.{Cluster, MetricName}
 import org.apache.kafka.common.metrics._
 import org.apache.kafka.common.metrics.Metrics
@@ -192,7 +191,7 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
                          private val time: Time,
                          private val schedulerOpt: Option[KafkaScheduler],
                          private val threadNamePrefix: String,
-                         private val clientQuotaCallback: Option[ClientQuotaCallback] = None) extends Logging {
+                         private val clientQuotaCallback: Option[ClientQuotaCallback] = None) extends RateLimitedLogging {
 
   private val lock = new ReentrantReadWriteLock()
   private val sensorAccessor = new SensorAccess(lock, metrics)
@@ -321,7 +320,7 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
         if(isDebugEnabled) {
           debug(msg)
         } else {
-          rateLimitedInfo(msg, "throttleLog_" + clientId, 100)
+          rateLimitedInfo(msg, "throttleLog_" + clientSensors.quotaSensor.name, 100)
         }
         throttleTimeMs
     }

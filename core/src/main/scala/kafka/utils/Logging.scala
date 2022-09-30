@@ -50,9 +50,6 @@ trait Logging {
 
   protected def loggerName: String = getClass.getName
 
-  //for rate limited log
-  private var rateLimitLogNextLogTimeMap: ConcurrentHashMap[String, Long] =  new ConcurrentHashMap()
-
   protected def msgWithLogIdent(msg: String): String =
     if (logIdent == null) msg else logIdent + msg
 
@@ -71,18 +68,6 @@ trait Logging {
   def info(msg: => String): Unit = logger.info(msgWithLogIdent(msg))
 
   def info(msg: => String,e: => Throwable): Unit = logger.info(msgWithLogIdent(msg),e)
-
-  // log at most once in intervalMs for the log tag
-  def rateLimitedInfo(msg: => String, tag: => String, intervalMs: => Int): Unit = {
-    val now = System.currentTimeMillis()
-    if(!rateLimitLogNextLogTimeMap.containsKey(tag)) {
-      rateLimitLogNextLogTimeMap.put(tag, Long.MinValue)
-    }
-    if (now > rateLimitLogNextLogTimeMap.get(tag)) {
-      rateLimitLogNextLogTimeMap.put(tag, now + intervalMs)
-      logger.info(s"RateLimitedLog for ${tag}: ${msgWithLogIdent(msg)} }")
-    }
-  }
 
   def warn(msg: => String): Unit = logger.warn(msgWithLogIdent(msg))
 
