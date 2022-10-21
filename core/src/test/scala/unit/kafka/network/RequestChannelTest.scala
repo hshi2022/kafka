@@ -21,15 +21,18 @@ package kafka.network
 import java.io.IOException
 import java.net.InetAddress
 import java.nio.ByteBuffer
-import java.util.Collections
+import java.util.{Collections, Optional}
 import com.fasterxml.jackson.databind.ObjectMapper
 import kafka.network
+import kafka.network.RequestChannel.{Metrics, Request}
+import kafka.server.Defaults
 import kafka.utils.TestUtils
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType
+import org.apache.kafka.common.TopicPartition
 import org.apache.kafka.common.config.types.Password
 import org.apache.kafka.common.config.{ConfigResource, SaslConfigs, SslConfigs, TopicConfig}
 import org.apache.kafka.common.memory.MemoryPool
-import org.apache.kafka.common.message.IncrementalAlterConfigsRequestData
+import org.apache.kafka.common.message.{IncrementalAlterConfigsRequestData, ProduceRequestData}
 import org.apache.kafka.common.message.IncrementalAlterConfigsRequestData._
 import org.apache.kafka.common.network.{ByteBufferSend, ClientInformation, ListenerName}
 import org.apache.kafka.common.protocol.{ApiKeys, Errors}
@@ -255,6 +258,142 @@ class RequestChannelTest {
     assertTrue(capturedValue.error().equals(Errors.NOT_CONTROLLER))
   }
 
+  @Test
+  def testMetricsRequestSizeBucket(): Unit = {
+    val apis = Seq(ApiKeys.FETCH, ApiKeys.PRODUCE)
+    var metrics = new Metrics(apis, "0, 10, 20, 200")
+    val fetchMetricsNameMap = metrics.consumerFetchRequestSizeMetricNameMap
+    assertEquals(4, fetchMetricsNameMap.size)
+    assertTrue(fetchMetricsNameMap.contains(0))
+    assertTrue(fetchMetricsNameMap.contains(10))
+    assertTrue(fetchMetricsNameMap.contains(20))
+    assertTrue(fetchMetricsNameMap.contains(200))
+    val flattenFetchMetricNames = metrics.getConsumerFetchRequestSizeMetricNames
+    assertEquals(4, flattenFetchMetricNames.size)
+    assertEquals("FetchConsumer0To10Mb", fetchMetricsNameMap(0))
+    assertTrue(flattenFetchMetricNames.contains("FetchConsumer0To10Mb"))
+    assertEquals("FetchConsumer10To20Mb", fetchMetricsNameMap(10))
+    assertTrue(flattenFetchMetricNames.contains("FetchConsumer10To20Mb"))
+    assertEquals("FetchConsumer20To200Mb", fetchMetricsNameMap(20))
+    assertTrue(flattenFetchMetricNames.contains("FetchConsumer20To200Mb"))
+    assertEquals("FetchConsumer200MbGreater", fetchMetricsNameMap(200))
+    assertTrue(flattenFetchMetricNames.contains("FetchConsumer200MbGreater"))
+
+    val produceMetricsNameMaps = metrics.produceRequestAcksSizeMetricNameMap
+    assertEquals(3, produceMetricsNameMaps.size)
+
+    assertTrue(produceMetricsNameMaps.contains(0))
+    assertTrue(produceMetricsNameMaps.contains(1))
+    assertTrue(produceMetricsNameMaps.contains(-1))
+    val flattenProduceMetricNames = metrics.getProduceRequestAcksSizeMetricNames
+    assertEquals(12, flattenProduceMetricNames.size)
+    var i = 0
+    while(i < 3) {
+      val ackKey = if (i == 2) -1 else i
+      val ackKeyString = if(i == 2) "All" else i.toString
+      val produceMetricsNameMap = produceMetricsNameMaps(ackKey)
+      assertTrue(produceMetricsNameMap.contains(0))
+      assertTrue(produceMetricsNameMap.contains(10))
+      assertTrue(produceMetricsNameMap.contains(20))
+      assertTrue(produceMetricsNameMap.contains(200))
+      var metricName = "Produce0To10MbAcks" + ackKeyString
+      assertEquals(metricName, produceMetricsNameMap(0))
+      assertTrue(flattenProduceMetricNames.contains(metricName))
+      metricName = "Produce10To20MbAcks" + ackKeyString
+      assertEquals(metricName, produceMetricsNameMap(10))
+      assertTrue(flattenProduceMetricNames.contains(metricName))
+      metricName = "Produce20To200MbAcks" + ackKeyString
+      assertEquals(metricName, produceMetricsNameMap(20))
+      assertTrue(flattenProduceMetricNames.contains(metricName))
+      metricName = "Produce200MbGreaterAcks" + ackKeyString
+      assertEquals(metricName, produceMetricsNameMap(200))
+      assertTrue(flattenProduceMetricNames.contains(metricName))
+      i += 1
+    }
+
+    // test incorrect config, in which case default config would be used
+    metrics = new Metrics(apis, "")
+    testMetricsRequestSizeBucketDefault(metrics)
+    metrics = new Metrics(apis, "1")
+    testMetricsRequestSizeBucketDefault(metrics)
+    metrics = new Metrics(apis, "1, 2, 5, a, 9")
+    testMetricsRequestSizeBucketDefault(metrics)
+
+    // test get the bucket name
+    metrics = new Metrics(apis, "0, 10, 20, 200")
+    val metadataRequest = request(new MetadataRequest.Builder(List("topic").asJava, true).build(), metrics)
+    assertEquals(Seq.empty, metadataRequest.getConsumerFetchSizeBucketMetricName)
+    assertEquals(Seq.empty, metadataRequest.getProduceAckSizeBucketMetricName)
+
+    var produceRequest = request(new ProduceRequest.Builder(0, 0,
+      new ProduceRequestData().setAcks(1.toShort).setTimeoutMs(1000)).build(),
+      metrics)
+    assertEquals(Seq.empty, produceRequest.getConsumerFetchSizeBucketMetricName)
+    assertEquals("Produce0To10MbAcks1", produceRequest.getProduceAckSizeBucketMetricName(0))
+    produceRequest = request(new ProduceRequest.Builder(0, 0,
+      new ProduceRequestData().setAcks(-1).setTimeoutMs(1000)).build(),
+      metrics)
+    assertEquals("Produce0To10MbAcksAll", produceRequest.getProduceAckSizeBucketMetricName(0))
+
+
+    val tp = new TopicPartition("foo", 0)
+    val fetchData = Map(tp -> new FetchRequest.PartitionData(0, 0, 1000,
+      Optional.empty())).asJava
+    val consumeFetchRequest = request(new FetchRequest.Builder(9, 9, -1, 100, 0, fetchData)
+      .build(),
+      metrics)
+    assertEquals("FetchConsumer0To10Mb", consumeFetchRequest.getConsumerFetchSizeBucketMetricName(0))
+    assertEquals(Seq.empty, consumeFetchRequest.getProduceAckSizeBucketMetricName)
+    val followerFetchRequest = request(new FetchRequest.Builder(9, 9, 1, 100, 0, fetchData)
+      .build(),
+      metrics)
+    assertEquals(Seq.empty, followerFetchRequest.getConsumerFetchSizeBucketMetricName)
+
+    assertEquals("FetchConsumer0To10Mb", metrics.getRequestSizeBucketMetricName(metrics.consumerFetchRequestSizeMetricNameMap, 2*1024 *1024))
+    assertEquals("Produce10To20MbAcks0", metrics.getRequestSizeBucketMetricName(metrics.produceRequestAcksSizeMetricNameMap(0), 10*1024 *1024))
+    assertEquals("Produce200MbGreaterAcks1", metrics.getRequestSizeBucketMetricName(metrics.produceRequestAcksSizeMetricNameMap(1), 201*1024 *1024))
+    assertEquals("Produce0To10MbAcksAll", metrics.getRequestSizeBucketMetricName(metrics.produceRequestAcksSizeMetricNameMap(-1), 0))
+    assertEquals("Produce20To200MbAcksAll", metrics.getRequestSizeBucketMetricName(metrics.produceRequestAcksSizeMetricNameMap(-1), 35*1024 *1024))
+  }
+
+  private def testMetricsRequestSizeBucketDefault(metrics: Metrics): Unit = {
+    //default bucket "0,1,10,50,100"
+    val fetchMetricsNameMap = metrics.consumerFetchRequestSizeMetricNameMap
+    assertEquals(5, fetchMetricsNameMap.size)
+    assertTrue(fetchMetricsNameMap.contains(0))
+    assertTrue(fetchMetricsNameMap.contains(1))
+    assertTrue(fetchMetricsNameMap.contains(10))
+    assertTrue(fetchMetricsNameMap.contains(50))
+    assertTrue(fetchMetricsNameMap.contains(100))
+    assertEquals("FetchConsumer0To1Mb", fetchMetricsNameMap(0))
+    assertEquals("FetchConsumer1To10Mb", fetchMetricsNameMap(1))
+    assertEquals("FetchConsumer10To50Mb", fetchMetricsNameMap(10))
+    assertEquals("FetchConsumer50To100Mb", fetchMetricsNameMap(50))
+    assertEquals("FetchConsumer100MbGreater", fetchMetricsNameMap(100))
+    val produceMetricsNameMaps = metrics.produceRequestAcksSizeMetricNameMap
+    assertEquals(3, produceMetricsNameMaps.size)
+    assertTrue(produceMetricsNameMaps.contains(0))
+    assertTrue(produceMetricsNameMaps.contains(1))
+    assertTrue(produceMetricsNameMaps.contains(-1))
+    var i = 0
+    while(i < 3) {
+      val ackKey = if (i == 2) -1 else i
+      val ackKeyString = if(i == 2) "All" else i.toString
+      val produceMetricsNameMap = produceMetricsNameMaps(ackKey)
+      assertTrue(produceMetricsNameMap.contains(0))
+      assertTrue(produceMetricsNameMap.contains(1))
+      assertTrue(produceMetricsNameMap.contains(10))
+      assertTrue(produceMetricsNameMap.contains(50))
+      assertTrue(produceMetricsNameMap.contains(100))
+      assertEquals("Produce0To1MbAcks" + ackKeyString, produceMetricsNameMap(0))
+      assertEquals("Produce1To10MbAcks" + ackKeyString, produceMetricsNameMap(1))
+      assertEquals("Produce10To50MbAcks" + ackKeyString, produceMetricsNameMap(10))
+      assertEquals("Produce50To100MbAcks" + ackKeyString, produceMetricsNameMap(50))
+      assertEquals("Produce100MbGreaterAcks" + ackKeyString, produceMetricsNameMap(100))
+      i += 1
+    }
+  }
+
   private def buildMetadataRequest(): AbstractRequest = {
     val resourceName = "topic-1"
     val header = new RequestHeader(ApiKeys.METADATA, ApiKeys.METADATA.latestVersion,
@@ -281,7 +420,7 @@ class RequestChannelTest {
     }
   }
 
-  def request(req: AbstractRequest): RequestChannel.Request = {
+  def request(req: AbstractRequest, metrics: Metrics): RequestChannel.Request = {
     val buffer = req.serializeWithHeader(new RequestHeader(req.apiKey, req.version, "client-id", 1))
     val requestContext = newRequestContext(buffer)
     new network.RequestChannel.Request(processor = 1,
@@ -289,8 +428,12 @@ class RequestChannelTest {
       startTimeNanos = 0,
       createNiceMock(classOf[MemoryPool]),
       buffer,
-      createNiceMock(classOf[RequestChannel.Metrics])
+      metrics
     )
+  }
+
+  def request(req: AbstractRequest): RequestChannel.Request = {
+    request(req, createNiceMock(classOf[RequestChannel.Metrics]))
   }
 
   private def newRequestContext(buffer: ByteBuffer): RequestContext = {
