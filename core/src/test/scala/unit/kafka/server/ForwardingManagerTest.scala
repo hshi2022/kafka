@@ -238,7 +238,7 @@ class ForwardingManagerTest {
       startTimeNanos = time.nanoseconds(),
       memoryPool = MemoryPool.NONE,
       buffer = requestBuffer,
-      metrics = new RequestChannel.Metrics(ListenerType.CONTROLLER),
+      metrics = new RequestChannel.Metrics(ListenerType.CONTROLLER, ""),
       envelope = None
     )
   }

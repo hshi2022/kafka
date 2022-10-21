@@ -25,7 +25,7 @@ import com.typesafe.scalalogging.Logger
 import com.yammer.metrics.core.{Histogram, Meter}
 import kafka.metrics.KafkaMetricsGroup
 import kafka.network
-import kafka.server.{BrokerMetadataStats, KafkaConfig, Observer}
+import kafka.server.{BrokerMetadataStats, Defaults, KafkaConfig, Observer}
 import kafka.utils.{Logging, NotNothing, Pool}
 import kafka.utils.Implicits._
 import org.apache.kafka.common.config.ConfigResource
@@ -38,8 +38,10 @@ import org.apache.kafka.common.requests._
 import org.apache.kafka.common.security.auth.KafkaPrincipal
 import org.apache.kafka.common.utils.{Sanitizer, Time}
 
+import java.util
 import scala.annotation.nowarn
 import scala.collection.mutable
+import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 
@@ -59,23 +61,100 @@ object RequestChannel extends Logging {
     val sanitizedUser: String = Sanitizer.sanitize(principal.getName)
   }
 
-  class Metrics(enabledApis: Iterable[ApiKeys]) {
-    def this(scope: ListenerType) = {
-      this(ApiKeys.apisForListener(scope).asScala)
+  class Metrics(enabledApis: Iterable[ApiKeys], requestMetricsSizeBucketsConfig: String) {
+    def this(scope: ListenerType, requestMetricsSizeBucketsConfig: String) = {
+      this(ApiKeys.apisForListener(scope).asScala, requestMetricsSizeBucketsConfig)
     }
 
     private val metricsMap = mutable.Map[String, RequestMetrics]()
 
+    // map[acks, map[requestSize, metricName]]
+    // this is used to create metrics for produce requests of different size and acks
+    val produceRequestAcksSizeMetricNameMap = getProduceRequestAcksSizeMetricNameMap()
+    // map[responseSize, metricName]
+    // this is used to create metrics for fetch requests of different response size
+    val consumerFetchRequestSizeMetricNameMap = getConsumerFetchRequestAcksSizeMetricNameMap
+
     (enabledApis.map(_.name) ++
       Seq(RequestMetrics.MetadataAllTopics) ++
-      Seq(RequestMetrics.consumerFetchMetricName, RequestMetrics.followFetchMetricName)).foreach { name =>
-      metricsMap.put(name, new RequestMetrics(name))
+      Seq(RequestMetrics.consumerFetchMetricName, RequestMetrics.followFetchMetricName) ++
+      getConsumerFetchRequestSizeMetricNames ++
+      getProduceRequestAcksSizeMetricNames)
+      .foreach { name => metricsMap.put(name, new RequestMetrics(name))
     }
 
     def apply(metricName: String): RequestMetrics = metricsMap(metricName)
 
     def close(): Unit = {
        metricsMap.values.foreach(_.removeMetrics())
+    }
+
+    // generate map[request/responseSize, metricName] for requests of different size
+    def getRequestSizeMetricNameMap(requestType: String):Map[Int, String] = {
+      // convert requestMetricsSizeBucketsConfig from string to int array. e.g., "0,1,10,50,100" => [0,1,10,50,100]
+      var bucketsString = requestMetricsSizeBucketsConfig.replaceAll("\\s", "").split(',')
+      if(bucketsString.length < 2) {
+        error(s"requestMetricsSizeBuckets has fewer than 2 buckets: '${requestMetricsSizeBucketsConfig}'. " +
+          s"use default value instead ")
+        bucketsString = Defaults.RequestMetricsSizeBuckets.replaceAll("\\s", "").split(',')
+      }
+      var bucketsInt = Array[Int](bucketsString.length)
+      try {
+        bucketsInt = bucketsString.map(_.toInt)
+      } catch {
+        case e: Exception => {
+          error(s"Failed to parse requestMetricsSizeBuckets: '${requestMetricsSizeBucketsConfig}'. " +
+            s"use default value instead ", e)
+          bucketsInt = Defaults.RequestMetricsSizeBuckets.replaceAll("\\s", "").split(',').map(_.toInt)
+        }
+      }
+
+      // get size and corresponding term to be used in metric name
+      // [0,1,10,50,100] => requestSizeBuckets:Seq((0, "0To1Mb"), (1, "1To10Mb"), (10, "10To50Mb"), (50, "50To100Mb"),
+      // (100, "100MbGreater"))
+      val requestSizeBuckets = for (i <- 0 until bucketsInt.length) yield {
+        val size = bucketsInt(i)
+        if (i == bucketsInt.length - 1) (size, s"${size}MbGreater")
+        else (size, s"${size}To${bucketsInt(i + 1)}Mb")
+      }
+      requestSizeBuckets.map(bucket => (bucket._1, s"${requestType}${bucket._2}")).toMap
+    }
+
+    // generate map[acks, map[requestSize, metricName]] for produce requests of different request size and acks
+    def getProduceRequestAcksSizeMetricNameMap():Map[Int, Map[Int, String]] = {
+      val produceRequestAcks = Seq((0, "0"), (1, "1"), (-1, "All"))
+      val requestSizeMetricNameMap = getRequestSizeMetricNameMap(ApiKeys.PRODUCE.name)
+
+      produceRequestAcks.map(ack =>
+        (ack._1, requestSizeMetricNameMap.map({case(size, name) => (size, s"${name}Acks${ack._2}")}))).toMap
+    }
+
+    // generate map[responseSize, metricName] for consumerFetch requests of different request size and acks
+    def getConsumerFetchRequestAcksSizeMetricNameMap():Map[Int, String] = {
+      getRequestSizeMetricNameMap(RequestMetrics.consumerFetchMetricName)
+    }
+
+    // get all the metric names for produce requests of different acks and size
+    def getProduceRequestAcksSizeMetricNames : Seq[String] = {
+      produceRequestAcksSizeMetricNameMap.values.toSeq.map(a => a.values.toSeq).flatten
+    }
+
+    // get all the metric names for fetch requests of different size
+    def getConsumerFetchRequestSizeMetricNames : Seq[String] = {
+      consumerFetchRequestSizeMetricNameMap.values.toSeq
+    }
+
+    // get the metric name for a given request/response size
+    // the bucket is [left, right)
+    def getRequestSizeBucketMetricName(sizeMetricNameMap: Map[Int, String], sizeBytes: Long): String = {
+      val sizeMb = sizeBytes / 1024 / 1024
+      val sortedSizeBuckets = sizeMetricNameMap.keys.toArray
+      util.Arrays.sort(sortedSizeBuckets)
+      var sizeIndex = util.Arrays.binarySearch(sortedSizeBuckets, sizeMb.toInt)
+      // if SizeMb is not the bucket boundary (key in the map),
+      // its metrics name is the value of the first key that is smaller to it.
+      if (sizeIndex < 0) sizeIndex = -(sizeIndex + 1) - 1
+      sizeMetricNameMap(sortedSizeBuckets(sizeIndex))
     }
   }
 
@@ -207,6 +286,28 @@ object RequestChannel extends Logging {
       math.max(apiLocalCompleteTimeNanos - requestDequeueTimeNanos, 0L)
     }
 
+    def getConsumerFetchSizeBucketMetricName: Seq[String] = {
+      if (header.apiKey != ApiKeys.FETCH)
+        Seq.empty
+      else {
+        val isFromFollower = body[FetchRequest].isFromFollower
+        if (isFromFollower) Seq.empty
+        else Seq(metrics.getRequestSizeBucketMetricName(metrics.consumerFetchRequestSizeMetricNameMap, responseBytes))
+      }
+    }
+    def getProduceAckSizeBucketMetricName: Seq[String] = {
+      if (header.apiKey != ApiKeys.PRODUCE)
+        Seq.empty
+      else {
+        var acks = body[ProduceRequest].acks()
+        if(!metrics.produceRequestAcksSizeMetricNameMap.contains(acks)) {
+          error(s"metrics.produceRequestAcksSizeMetricNameMap does not contain key acks '${acks}', use -1 instead.")
+          acks = -1
+        }
+        Seq(metrics.getRequestSizeBucketMetricName(metrics.produceRequestAcksSizeMetricNameMap(acks), sizeOfBodyInBytes))
+      }
+    }
+
     def updateRequestMetrics(networkThreadTimeNanos: Long, response: Response): Unit = {
       val endTimeNanos = Time.SYSTEM.nanoseconds
 
@@ -240,7 +341,9 @@ object RequestChannel extends Logging {
         if (header.apiKey() == ApiKeys.METADATA && body[MetadataRequest].isAllTopics) {
           Seq(RequestMetrics.MetadataAllTopics)
         } else Seq.empty
-      val metricNames =  (fetchMetricNames ++ metadataMetricNames) :+ header.apiKey.name
+
+      val metricNames =  (fetchMetricNames ++ metadataMetricNames ++ getConsumerFetchSizeBucketMetricName ++
+        getProduceAckSizeBucketMetricName) :+ header.apiKey.name
       metricNames.foreach { metricName =>
         val m = metrics(metricName)
         m.requestRate(header.apiVersion).mark()
