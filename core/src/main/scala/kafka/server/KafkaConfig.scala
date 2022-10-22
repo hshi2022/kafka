@@ -34,7 +34,7 @@ import kafka.utils.Implicits._
 import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.common.Reconfigurable
 import org.apache.kafka.common.config.{AbstractConfig, ConfigDef, ConfigException, ConfigResource, SaslConfigs, SecurityConfig, SslClientAuth, SslConfigs, TopicConfig}
-import org.apache.kafka.common.config.ConfigDef.{ConfigKey, ValidList}
+import org.apache.kafka.common.config.ConfigDef.{ConfigKey, ValidList, Validator}
 import org.apache.kafka.common.config.internals.BrokerSecurityConfigs
 import org.apache.kafka.common.config.types.Password
 import org.apache.kafka.common.metrics.Sensor
@@ -1388,7 +1388,7 @@ object KafkaConfig {
       .define(MetricReporterClassesProp, LIST, Defaults.MetricReporterClasses, LOW, MetricReporterClassesDoc)
       .define(MetricRecordingLevelProp, STRING, Defaults.MetricRecordingLevel, LOW, MetricRecordingLevelDoc)
       .define(MetricReplaceOnDuplicateProp, BOOLEAN, Defaults.MetricReplaceOnDuplicate, LOW, MetricReplaceOnDuplicateDoc)
-      .define(RequestMetricsSizeBucketsProp, STRING, Defaults.RequestMetricsSizeBuckets, LOW, RequestMetricsSizeBucketsDoc)
+      .define(RequestMetricsSizeBucketsProp, STRING, Defaults.RequestMetricsSizeBuckets, RequestMetricsSizeBucketsValidator, LOW, RequestMetricsSizeBucketsDoc)
 
       /** ********* Kafka Yammer Metrics Reporter Configuration for docs ***********/
       .define(KafkaMetricsReporterClassesProp, LIST, Defaults.KafkaMetricReporterClasses, LOW, KafkaMetricsReporterClassesDoc)
@@ -1478,6 +1478,24 @@ object KafkaConfig {
       .define(RaftConfig.QUORUM_LINGER_MS_CONFIG, INT, Defaults.QuorumLingerMs, null, MEDIUM, RaftConfig.QUORUM_LINGER_MS_DOC)
       .define(RaftConfig.QUORUM_REQUEST_TIMEOUT_MS_CONFIG, INT, Defaults.QuorumRequestTimeoutMs, null, MEDIUM, RaftConfig.QUORUM_REQUEST_TIMEOUT_MS_DOC)
       .define(RaftConfig.QUORUM_RETRY_BACKOFF_MS_CONFIG, INT, Defaults.QuorumRetryBackoffMs, null, LOW, RaftConfig.QUORUM_RETRY_BACKOFF_MS_DOC)
+  }
+
+  object RequestMetricsSizeBucketsValidator extends Validator {
+    override def ensureValid(name: String, value: Any): Unit = {
+      val bucketsString = value.toString.replaceAll("\\s", "").split(',')
+      if(bucketsString.length < 2) {
+        throw new ConfigException(name, value, s"requestMetricsSizeBuckets has fewer than 2 buckets: '${value}'.")
+      }
+      var bucketsInt = Array[Int](bucketsString.length)
+      try {
+        bucketsInt = bucketsString.map(_.toInt)
+      } catch {
+        case e: Exception =>
+          throw new ConfigException(name, value, s"Failed to parse requestMetricsSizeBuckets: '${value}'. ")
+      }
+    }
+
+    override def toString: String = "integer list, separated by ',', at least two integers"
   }
 
   /** ********* Remote Log Management Configuration *********/

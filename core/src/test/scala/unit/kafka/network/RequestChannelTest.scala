@@ -21,11 +21,11 @@ package kafka.network
 import java.io.IOException
 import java.net.InetAddress
 import java.nio.ByteBuffer
-import java.util.{Collections, Optional}
+import java.util.{Collections, Optional, Properties}
 import com.fasterxml.jackson.databind.ObjectMapper
 import kafka.network
 import kafka.network.RequestChannel.{Metrics, Request}
-import kafka.server.Defaults
+import kafka.server.{Defaults, KafkaConfig}
 import kafka.utils.TestUtils
 import org.apache.kafka.clients.admin.AlterConfigOp.OpType
 import org.apache.kafka.common.TopicPartition
@@ -261,7 +261,11 @@ class RequestChannelTest {
   @Test
   def testMetricsRequestSizeBucket(): Unit = {
     val apis = Seq(ApiKeys.FETCH, ApiKeys.PRODUCE)
-    var metrics = new Metrics(apis, "0, 10, 20, 200")
+    var props = new Properties()
+    props.put(KafkaConfig.ZkConnectProp, "127.0.0.1:2181")
+    props.put(KafkaConfig.RequestMetricsSizeBucketsProp, "0, 10, 20, 200")
+    var config = KafkaConfig.fromProps(props)
+    var metrics = new Metrics(apis, config)
     val fetchMetricsNameMap = metrics.consumerFetchRequestSizeMetricNameMap
     assertEquals(4, fetchMetricsNameMap.size)
     assertTrue(fetchMetricsNameMap.contains(0))
@@ -288,7 +292,7 @@ class RequestChannelTest {
     val flattenProduceMetricNames = metrics.getProduceRequestAcksSizeMetricNames
     assertEquals(12, flattenProduceMetricNames.size)
     var i = 0
-    while(i < 3) {
+    for (i <- 0 until 3) {
       val ackKey = if (i == 2) -1 else i
       val ackKeyString = if(i == 2) "All" else i.toString
       val produceMetricsNameMap = produceMetricsNameMaps(ackKey)
@@ -308,19 +312,9 @@ class RequestChannelTest {
       metricName = "Produce200MbGreaterAcks" + ackKeyString
       assertEquals(metricName, produceMetricsNameMap(200))
       assertTrue(flattenProduceMetricNames.contains(metricName))
-      i += 1
     }
 
-    // test incorrect config, in which case default config would be used
-    metrics = new Metrics(apis, "")
-    testMetricsRequestSizeBucketDefault(metrics)
-    metrics = new Metrics(apis, "1")
-    testMetricsRequestSizeBucketDefault(metrics)
-    metrics = new Metrics(apis, "1, 2, 5, a, 9")
-    testMetricsRequestSizeBucketDefault(metrics)
-
     // test get the bucket name
-    metrics = new Metrics(apis, "0, 10, 20, 200")
     val metadataRequest = request(new MetadataRequest.Builder(List("topic").asJava, true).build(), metrics)
     assertEquals(Seq.empty, metadataRequest.getConsumerFetchSizeBucketMetricName)
     assertEquals(Seq.empty, metadataRequest.getProduceAckSizeBucketMetricName)
@@ -334,7 +328,6 @@ class RequestChannelTest {
       new ProduceRequestData().setAcks(-1).setTimeoutMs(1000)).build(),
       metrics)
     assertEquals("Produce0To10MbAcksAll", produceRequest.getProduceAckSizeBucketMetricName(0))
-
 
     val tp = new TopicPartition("foo", 0)
     val fetchData = Map(tp -> new FetchRequest.PartitionData(0, 0, 1000,
@@ -354,6 +347,13 @@ class RequestChannelTest {
     assertEquals("Produce200MbGreaterAcks1", metrics.getRequestSizeBucketMetricName(metrics.produceRequestAcksSizeMetricNameMap(1), 201*1024 *1024))
     assertEquals("Produce0To10MbAcksAll", metrics.getRequestSizeBucketMetricName(metrics.produceRequestAcksSizeMetricNameMap(-1), 0))
     assertEquals("Produce20To200MbAcksAll", metrics.getRequestSizeBucketMetricName(metrics.produceRequestAcksSizeMetricNameMap(-1), 35*1024 *1024))
+
+    // test default config
+    props = new Properties()
+    props.put(KafkaConfig.ZkConnectProp, "127.0.0.1:2181")
+    config = KafkaConfig.fromProps(props)
+    metrics = new Metrics(apis, config)
+    testMetricsRequestSizeBucketDefault(metrics)
   }
 
   private def testMetricsRequestSizeBucketDefault(metrics: Metrics): Unit = {
@@ -376,7 +376,7 @@ class RequestChannelTest {
     assertTrue(produceMetricsNameMaps.contains(1))
     assertTrue(produceMetricsNameMaps.contains(-1))
     var i = 0
-    while(i < 3) {
+    for (i <- 0 until 3) {
       val ackKey = if (i == 2) -1 else i
       val ackKeyString = if(i == 2) "All" else i.toString
       val produceMetricsNameMap = produceMetricsNameMaps(ackKey)
@@ -390,7 +390,6 @@ class RequestChannelTest {
       assertEquals("Produce10To50MbAcks" + ackKeyString, produceMetricsNameMap(10))
       assertEquals("Produce50To100MbAcks" + ackKeyString, produceMetricsNameMap(50))
       assertEquals("Produce100MbGreaterAcks" + ackKeyString, produceMetricsNameMap(100))
-      i += 1
     }
   }
 
