@@ -41,7 +41,6 @@ import org.apache.kafka.common.utils.{Sanitizer, Time}
 import java.util
 import scala.annotation.nowarn
 import scala.collection.mutable
-import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters._
 import scala.reflect.ClassTag
 
@@ -90,7 +89,7 @@ object RequestChannel extends Logging {
     }
 
     // generate map[request/responseSize, metricName] for requests of different size
-    def getRequestSizeMetricNameMap(requestType: String):Map[Int, String] = {
+    def getRequestSizeMetricNameMap(requestType: String):util.TreeMap[Int, String] = {
       val buckets = config.requestMetricsSizeBuckets
       // get size and corresponding term to be used in metric name
       // [0,1,10,50,100] => requestSizeBuckets:Seq((0, "0To1Mb"), (1, "1To10Mb"), (10, "10To50Mb"), (50, "50To100Mb"),
@@ -100,44 +99,46 @@ object RequestChannel extends Logging {
         if (i == buckets.length - 1) (size, s"${size}MbGreater")
         else (size, s"${size}To${buckets(i + 1)}Mb")
       }
+      val treeMap = new util.TreeMap[Int, String]
       requestSizeBuckets.map(bucket => (bucket._1, s"${requestType}${bucket._2}")).toMap
+        .foreach{case (size, bucket) => treeMap.put(size, bucket)}
+      treeMap
     }
 
     // generate map[acks, map[requestSize, metricName]] for produce requests of different request size and acks
-    private def getProduceRequestAcksSizeMetricNameMap():Map[Int, Map[Int, String]] = {
+    private def getProduceRequestAcksSizeMetricNameMap():Map[Int, util.TreeMap[Int, String]] = {
       val produceRequestAcks = Seq((0, "0"), (1, "1"), (-1, "All"))
       val requestSizeMetricNameMap = getRequestSizeMetricNameMap(ApiKeys.PRODUCE.name)
 
-      produceRequestAcks.map(ack =>
-        (ack._1, requestSizeMetricNameMap.map({case(size, name) => (size, s"${name}Acks${ack._2}")}))).toMap
+      val ackSizeMetricNames = for(ack <- produceRequestAcks) yield {
+        val treeMap = new util.TreeMap[Int, String]
+        requestSizeMetricNameMap.asScala.map({case(size, name) => treeMap.put(size, s"${name}Acks${ack._2}")})
+        (ack._1, treeMap)
+      }
+      ackSizeMetricNames.toMap
     }
 
     // generate map[responseSize, metricName] for consumerFetch requests of different request size and acks
-    private def getConsumerFetchRequestAcksSizeMetricNameMap():Map[Int, String] = {
+    private def getConsumerFetchRequestAcksSizeMetricNameMap():util.TreeMap[Int, String] = {
       getRequestSizeMetricNameMap(RequestMetrics.consumerFetchMetricName)
     }
 
     // get all the metric names for produce requests of different acks and size
     def getProduceRequestAcksSizeMetricNames : Seq[String] = {
-      produceRequestAcksSizeMetricNameMap.values.toSeq.map(a => a.values.toSeq).flatten
+      produceRequestAcksSizeMetricNameMap.values.toSeq.map(a => a.values.asScala.toSeq).flatten
     }
 
     // get all the metric names for fetch requests of different size
     def getConsumerFetchRequestSizeMetricNames : Seq[String] = {
-      consumerFetchRequestSizeMetricNameMap.values.toSeq
+      consumerFetchRequestSizeMetricNameMap.values.asScala.toSeq
     }
 
     // get the metric name for a given request/response size
     // the bucket is [left, right)
-    def getRequestSizeBucketMetricName(sizeMetricNameMap: Map[Int, String], sizeBytes: Long): String = {
+    def getRequestSizeBucketMetricName(sizeMetricNameMap: util.TreeMap[Int, String], sizeBytes: Long): String = {
       val sizeMb = sizeBytes / 1024 / 1024
-      val sortedSizeBuckets = sizeMetricNameMap.keys.toArray
-      util.Arrays.sort(sortedSizeBuckets)
-      var sizeIndex = util.Arrays.binarySearch(sortedSizeBuckets, sizeMb.toInt)
-      // if SizeMb is not the bucket boundary (key in the map),
-      // its metrics name is the value of the first key that is smaller to it.
-      if (sizeIndex < 0) sizeIndex = -(sizeIndex + 1) - 1
-      sizeMetricNameMap(sortedSizeBuckets(sizeIndex))
+      if(sizeMb < sizeMetricNameMap.firstKey()) sizeMetricNameMap.firstEntry().getValue
+      else sizeMetricNameMap.floorEntry(sizeMb.toInt).getValue
     }
   }
 

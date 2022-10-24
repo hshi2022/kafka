@@ -268,19 +268,19 @@ class RequestChannelTest {
     var metrics = new Metrics(apis, config)
     val fetchMetricsNameMap = metrics.consumerFetchRequestSizeMetricNameMap
     assertEquals(4, fetchMetricsNameMap.size)
-    assertTrue(fetchMetricsNameMap.contains(0))
-    assertTrue(fetchMetricsNameMap.contains(10))
-    assertTrue(fetchMetricsNameMap.contains(20))
-    assertTrue(fetchMetricsNameMap.contains(200))
+    assertTrue(fetchMetricsNameMap.containsKey(0))
+    assertTrue(fetchMetricsNameMap.containsKey(10))
+    assertTrue(fetchMetricsNameMap.containsKey(20))
+    assertTrue(fetchMetricsNameMap.containsKey(200))
     val flattenFetchMetricNames = metrics.getConsumerFetchRequestSizeMetricNames
     assertEquals(4, flattenFetchMetricNames.size)
-    assertEquals("FetchConsumer0To10Mb", fetchMetricsNameMap(0))
+    assertEquals("FetchConsumer0To10Mb", fetchMetricsNameMap.get(0))
     assertTrue(flattenFetchMetricNames.contains("FetchConsumer0To10Mb"))
-    assertEquals("FetchConsumer10To20Mb", fetchMetricsNameMap(10))
+    assertEquals("FetchConsumer10To20Mb", fetchMetricsNameMap.get(10))
     assertTrue(flattenFetchMetricNames.contains("FetchConsumer10To20Mb"))
-    assertEquals("FetchConsumer20To200Mb", fetchMetricsNameMap(20))
+    assertEquals("FetchConsumer20To200Mb", fetchMetricsNameMap.get(20))
     assertTrue(flattenFetchMetricNames.contains("FetchConsumer20To200Mb"))
-    assertEquals("FetchConsumer200MbGreater", fetchMetricsNameMap(200))
+    assertEquals("FetchConsumer200MbGreater", fetchMetricsNameMap.get(200))
     assertTrue(flattenFetchMetricNames.contains("FetchConsumer200MbGreater"))
 
     val produceMetricsNameMaps = metrics.produceRequestAcksSizeMetricNameMap
@@ -296,21 +296,21 @@ class RequestChannelTest {
       val ackKey = if (i == 2) -1 else i
       val ackKeyString = if(i == 2) "All" else i.toString
       val produceMetricsNameMap = produceMetricsNameMaps(ackKey)
-      assertTrue(produceMetricsNameMap.contains(0))
-      assertTrue(produceMetricsNameMap.contains(10))
-      assertTrue(produceMetricsNameMap.contains(20))
-      assertTrue(produceMetricsNameMap.contains(200))
+      assertTrue(produceMetricsNameMap.containsKey(0))
+      assertTrue(produceMetricsNameMap.containsKey(10))
+      assertTrue(produceMetricsNameMap.containsKey(20))
+      assertTrue(produceMetricsNameMap.containsKey(200))
       var metricName = "Produce0To10MbAcks" + ackKeyString
-      assertEquals(metricName, produceMetricsNameMap(0))
+      assertEquals(metricName, produceMetricsNameMap.get(0))
       assertTrue(flattenProduceMetricNames.contains(metricName))
       metricName = "Produce10To20MbAcks" + ackKeyString
-      assertEquals(metricName, produceMetricsNameMap(10))
+      assertEquals(metricName, produceMetricsNameMap.get(10))
       assertTrue(flattenProduceMetricNames.contains(metricName))
       metricName = "Produce20To200MbAcks" + ackKeyString
-      assertEquals(metricName, produceMetricsNameMap(20))
+      assertEquals(metricName, produceMetricsNameMap.get(20))
       assertTrue(flattenProduceMetricNames.contains(metricName))
       metricName = "Produce200MbGreaterAcks" + ackKeyString
-      assertEquals(metricName, produceMetricsNameMap(200))
+      assertEquals(metricName, produceMetricsNameMap.get(200))
       assertTrue(flattenProduceMetricNames.contains(metricName))
     }
 
@@ -360,36 +360,35 @@ class RequestChannelTest {
     //default bucket "0,1,10,50,100"
     val fetchMetricsNameMap = metrics.consumerFetchRequestSizeMetricNameMap
     assertEquals(5, fetchMetricsNameMap.size)
-    assertTrue(fetchMetricsNameMap.contains(0))
-    assertTrue(fetchMetricsNameMap.contains(1))
-    assertTrue(fetchMetricsNameMap.contains(10))
-    assertTrue(fetchMetricsNameMap.contains(50))
-    assertTrue(fetchMetricsNameMap.contains(100))
-    assertEquals("FetchConsumer0To1Mb", fetchMetricsNameMap(0))
-    assertEquals("FetchConsumer1To10Mb", fetchMetricsNameMap(1))
-    assertEquals("FetchConsumer10To50Mb", fetchMetricsNameMap(10))
-    assertEquals("FetchConsumer50To100Mb", fetchMetricsNameMap(50))
-    assertEquals("FetchConsumer100MbGreater", fetchMetricsNameMap(100))
+    assertTrue(fetchMetricsNameMap.containsKey(0))
+    assertTrue(fetchMetricsNameMap.containsKey(1))
+    assertTrue(fetchMetricsNameMap.containsKey(10))
+    assertTrue(fetchMetricsNameMap.containsKey(50))
+    assertTrue(fetchMetricsNameMap.containsKey(100))
+    assertEquals("FetchConsumer0To1Mb", fetchMetricsNameMap.get(0))
+    assertEquals("FetchConsumer1To10Mb", fetchMetricsNameMap.get(1))
+    assertEquals("FetchConsumer10To50Mb", fetchMetricsNameMap.get(10))
+    assertEquals("FetchConsumer50To100Mb", fetchMetricsNameMap.get(50))
+    assertEquals("FetchConsumer100MbGreater", fetchMetricsNameMap.get(100))
     val produceMetricsNameMaps = metrics.produceRequestAcksSizeMetricNameMap
     assertEquals(3, produceMetricsNameMaps.size)
     assertTrue(produceMetricsNameMaps.contains(0))
     assertTrue(produceMetricsNameMaps.contains(1))
     assertTrue(produceMetricsNameMaps.contains(-1))
-    var i = 0
     for (i <- 0 until 3) {
       val ackKey = if (i == 2) -1 else i
       val ackKeyString = if(i == 2) "All" else i.toString
       val produceMetricsNameMap = produceMetricsNameMaps(ackKey)
-      assertTrue(produceMetricsNameMap.contains(0))
-      assertTrue(produceMetricsNameMap.contains(1))
-      assertTrue(produceMetricsNameMap.contains(10))
-      assertTrue(produceMetricsNameMap.contains(50))
-      assertTrue(produceMetricsNameMap.contains(100))
-      assertEquals("Produce0To1MbAcks" + ackKeyString, produceMetricsNameMap(0))
-      assertEquals("Produce1To10MbAcks" + ackKeyString, produceMetricsNameMap(1))
-      assertEquals("Produce10To50MbAcks" + ackKeyString, produceMetricsNameMap(10))
-      assertEquals("Produce50To100MbAcks" + ackKeyString, produceMetricsNameMap(50))
-      assertEquals("Produce100MbGreaterAcks" + ackKeyString, produceMetricsNameMap(100))
+      assertTrue(produceMetricsNameMap.containsKey(0))
+      assertTrue(produceMetricsNameMap.containsKey(1))
+      assertTrue(produceMetricsNameMap.containsKey(10))
+      assertTrue(produceMetricsNameMap.containsKey(50))
+      assertTrue(produceMetricsNameMap.containsKey(100))
+      assertEquals("Produce0To1MbAcks" + ackKeyString, produceMetricsNameMap.get(0))
+      assertEquals("Produce1To10MbAcks" + ackKeyString, produceMetricsNameMap.get(1))
+      assertEquals("Produce10To50MbAcks" + ackKeyString, produceMetricsNameMap.get(10))
+      assertEquals("Produce50To100MbAcks" + ackKeyString, produceMetricsNameMap.get(50))
+      assertEquals("Produce100MbGreaterAcks" + ackKeyString, produceMetricsNameMap.get(100))
     }
   }
 
