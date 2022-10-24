@@ -1482,20 +1482,25 @@ object KafkaConfig {
 
   object RequestMetricsSizeBucketsValidator extends Validator {
     override def ensureValid(name: String, value: Any): Unit = {
-      val bucketsString = value.toString.replaceAll("\\s", "").split(',')
-      if(bucketsString.length < 2) {
-        throw new ConfigException(name, value, s"requestMetricsSizeBuckets has fewer than 2 buckets: '${value}'.")
-      }
-      var bucketsInt = Array[Int](bucketsString.length)
-      try {
-        bucketsInt = bucketsString.map(_.toInt)
-      } catch {
-        case e: Exception =>
-          throw new ConfigException(name, value, s"Failed to parse requestMetricsSizeBuckets: '${value}'. ")
-      }
+      getRequestMetricsSizeBuckets(value.toString)
     }
 
     override def toString: String = "integer list, separated by ',', at least two integers"
+  }
+  // convert requestMetricsSizeBucketsConfig from string to int array. e.g., "0,1,10,50,100" => [0,1,10,50,100]
+  private def getRequestMetricsSizeBuckets(requestMetricsSizeBuckets: String): Array[Int] = {
+    val bucketsString = requestMetricsSizeBuckets.replaceAll("\\s", "").split(',')
+    if(bucketsString.length < 2) {
+      throw new ConfigException(RequestMetricsSizeBucketsProp, requestMetricsSizeBuckets,
+        s"requestMetricsSizeBuckets has fewer than 2 buckets: '${requestMetricsSizeBuckets}'.")
+    }
+    try {
+      bucketsString.map(_.toInt)
+    } catch {
+      case _: Exception =>
+        throw new ConfigException(RequestMetricsSizeBucketsProp, requestMetricsSizeBuckets,
+          s"Failed to parse requestMetricsSizeBuckets: '${requestMetricsSizeBuckets}'. ")
+    }
   }
 
   /** ********* Remote Log Management Configuration *********/
@@ -1929,7 +1934,7 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
   val metricSampleWindowMs = getLong(KafkaConfig.MetricSampleWindowMsProp)
   val metricRecordingLevel = getString(KafkaConfig.MetricRecordingLevelProp)
   val metricReplaceOnDuplicate = getBoolean(KafkaConfig.MetricReplaceOnDuplicateProp)
-  val requestMetricsSizeBuckets = getString(KafkaConfig.RequestMetricsSizeBucketsProp)
+  def requestMetricsSizeBuckets = getRequestMetricsSizeBuckets()
 
   /** ********* SSL/SASL Configuration **************/
   // Security configs may be overridden for listeners, so it is not safe to use the base values
@@ -2062,6 +2067,10 @@ class KafkaConfig(val props: java.util.Map[_, _], doLog: Boolean, dynamicConfigO
       CoreUtils.listenerListToEndPoints(advertisedListenersProp, listenerSecurityProtocolMap, requireDistinctPorts=false)
     else
       listeners.filterNot(l => controllerListenerNames.contains(l.listenerName.value()))
+  }
+
+  def getRequestMetricsSizeBuckets(): Array[Int] = {
+    KafkaConfig.getRequestMetricsSizeBuckets(getString(KafkaConfig.RequestMetricsSizeBucketsProp))
   }
 
   private def getInterBrokerListenerNameAndSecurityProtocol: (ListenerName, SecurityProtocol) = {
