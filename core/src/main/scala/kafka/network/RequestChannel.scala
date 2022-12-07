@@ -95,7 +95,7 @@ object RequestChannel extends Logging {
       // get size and corresponding term to be used in metric name
       // [0,1,10,50,100] => Seq((0, "Produce0To1Mb"), (1, "Produce1To10Mb"), (10, "Produce10To50Mb"),
       // (50, "Produce50To100Mb"),(100, "Produce100MbGreater"))
-      RequestMetrics.getBucketBoundaryObjectMap(buckets, requestType, "Mb", name => name)
+      RequestMetrics.getBucketBoundaryObjectMap(buckets, requestType, "Mb", name => name, false)
     }
 
     // generate map[acks, map[requestSize, metricName]] for produce requests of different request size and acks
@@ -685,15 +685,16 @@ object RequestMetrics {
 
   // generate map[bucketLeftBoundary, object] for buckets
   def getBucketBoundaryObjectMap[T](buckets: Array[Int], namePrefix: String, namePostfix: String,
-    createValueFunc: String => T): util.TreeMap[Int, T] = {
-    // get bin boundary and corresponding name to be used in createValueFunc
+    createValueFunc: String => T, addBinNum: Boolean): util.TreeMap[Int, T] = {
+    // get bin boundary and corresponding name to be used in createValueFunc. (addBinNum would help with metrics ordering)
     // [0,1,10,50,100], prefix=Produce, postfix=Mb =>
     // leftBoundaryBucketNames:Seq((0, "Produce0To1Mb"), (1, "Produce1To10Mb"), (10, "Produce10To50Mb"),
     // (50, "Produce50To100Mb"),(100, "Produce100MbGreater"))
     val leftBoundaryBucketNames = for (i <- 0 until buckets.length) yield {
+      val binNum = if (addBinNum) s"_Bin${i + 1}_" else ""
       val bucket = buckets(i)
-      if (i == buckets.length - 1) (bucket, s"${namePrefix}${bucket}${namePostfix}Greater")
-      else (bucket, s"${namePrefix}${bucket}To${buckets(i + 1)}${namePostfix}")
+      if (i == buckets.length - 1) (bucket, s"${namePrefix}${binNum}${bucket}${namePostfix}Greater")
+      else (bucket, s"${namePrefix}${binNum}${bucket}To${buckets(i + 1)}${namePostfix}")
     }
     val treeMap = new util.TreeMap[Int, T]
     leftBoundaryBucketNames.foreach{case (boundary, name) => treeMap.put(boundary, createValueFunc(name))}
@@ -702,7 +703,7 @@ object RequestMetrics {
 
   // get object for a given bucket boundary. the bucket is [left, right)
   def getBucketObject[T](bucketBoundaryObjectMap: util.TreeMap[Int, T], boundary: Int): T = {
-    if(boundary < bucketBoundaryObjectMap.firstKey()) bucketBoundaryObjectMap.firstEntry().getValue
+    if (boundary < bucketBoundaryObjectMap.firstKey()) bucketBoundaryObjectMap.firstEntry().getValue
     else bucketBoundaryObjectMap.floorEntry(boundary).getValue
   }
 
@@ -786,14 +787,24 @@ class RequestMetrics(name: String, config: KafkaConfig) extends KafkaMetricsGrou
   }
 
   class Histogram(val metricNamePrefix: String, val metricNamePostfix: String, val binBoundaries: Array[Int]) {
+    // bin boundary with Int type should be good for current usages
+    // If we need boundary bigger than Int.MaxValue, which probably indicates we should use a different unit
+
     // binLeftBoundary => (name, Counter)
     val boundaryCounterMap = createHistogram()
 
     def update(value: Double): Unit = {
       val valueLong = Math.round(value)
-      // bin boundary with Int type should be good for current usages
-      val valueInt = if(valueLong > Int.MaxValue) Int.MaxValue else valueLong.toInt
-      val counter = getBucketObject(boundaryCounterMap, valueInt)._2
+      update(valueLong)
+    }
+
+    def update(value: Long): Unit = {
+      val valueInt = if(value > Int.MaxValue) Int.MaxValue else value.toInt
+      update(valueInt)
+    }
+
+    def update(value: Int): Unit = {
+      val counter = getBucketObject(boundaryCounterMap, value)._2
       counter.inc()
     }
 
@@ -801,10 +812,11 @@ class RequestMetrics(name: String, config: KafkaConfig) extends KafkaMetricsGrou
       boundaryCounterMap.values.forEach(nameCounter => removeMetric(nameCounter._1, tags))
     }
 
-    // [0,10,50], namePrefix="TotalTime" => Map(0 => ("TotalTime0To10Ms", counter), 10 => ("TotalTime10To50Ms", , counter),
-    // 50 => ("TotalTime50MsGreater", counter))
+    // [0,10,50], metricNamePrefix="TotalTime", metricNamePostfix="Mb" =>
+    // Map(0=>("TotalTime0To10Ms", counter), 10=>("TotalTime10To50Ms", counter), 50=>("TotalTime50MsGreater", counter))
     private def createHistogram(): util.TreeMap[Int, (String, Counter)] = {
-      getBucketBoundaryObjectMap(binBoundaries, metricNamePrefix, metricNamePostfix, name => (name, newCounter(name, tags)))
+      getBucketBoundaryObjectMap(binBoundaries, metricNamePrefix, metricNamePostfix,
+        name => (name, newCounter(name, tags)), true)
     }
   }
 

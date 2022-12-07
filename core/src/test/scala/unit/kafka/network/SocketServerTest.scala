@@ -1133,21 +1133,25 @@ class SocketServerTest {
       val expectedTotalTimeCount = totalTimeHistCount() + 1
       TestUtils.waitUntilTrue(() => totalTimeHistCount() == expectedTotalTimeCount,
         s"request metrics not updated, expected: $expectedTotalTimeCount, actual: ${totalTimeHistCount()}")
-      Thread.sleep(10)
-      val updatedTotalTimeBucketHistCount = getTotalTimeBucketHistCount()
-      assertTrue(updatedTotalTimeBucketHistCount.size > 0)
-      assertEquals(originalTotalTimeBucketHistCount.size, updatedTotalTimeBucketHistCount.size)
-      var increaseCount = 0
-      // only one bucket should be updated
-      for(boundary <- originalTotalTimeBucketHistCount.keySet) {
-        val originalCount = originalTotalTimeBucketHistCount.get(boundary).get
-        val updatedCount = updatedTotalTimeBucketHistCount.get(boundary).get
-        if(originalCount != updatedCount) {
-          assertEquals(originalCount + 1, updatedCount)
-          increaseCount += 1
+
+      TestUtils.waitUntilTrue(() => {
+        val updatedTotalTimeBucketHistCount = getTotalTimeBucketHistCount()
+        assertTrue(updatedTotalTimeBucketHistCount.size > 0)
+        assertEquals(originalTotalTimeBucketHistCount.size, updatedTotalTimeBucketHistCount.size)
+        var increaseCount = 0
+        // only one bucket should be updated
+        for(boundary <- originalTotalTimeBucketHistCount.keySet) {
+          val originalCount = originalTotalTimeBucketHistCount.get(boundary).get
+          val updatedCount = updatedTotalTimeBucketHistCount.get(boundary).get
+          if(originalCount != updatedCount) {
+            assertEquals(originalCount + 1, updatedCount)
+            increaseCount += 1
+          }
         }
-      }
-      assertEquals(1, increaseCount)
+        assertTrue(increaseCount <= 1)
+        increaseCount == 1
+      },
+      "totalTimeBucketHist is not updated")
     } finally {
       shutdownServerAndMetrics(overrideServer)
     }
